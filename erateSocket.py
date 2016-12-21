@@ -9,7 +9,7 @@
 from scapy.all import *
 import logging
 logger = logging.getLogger(__name__)
-import random, threading
+import random, threading, string
 
 class erateSocket(object):
     def __init__(self, protocol,  change = '', index = 2, timeout = 0.5):
@@ -51,7 +51,7 @@ class erateSocket(object):
             # l4 stores the 'level 4' Info of the tcp stream, which will be used by scapy in making packets
             self.l4 = IP(src=self.srcIP,dst=self.dstIP)/TCP(sport=self.sport, dport=self.dport, flags=0, seq=self.initseq, ack=0)
             # This would then perform the three way handshake, calling send() is then allowed
-            return self.shake()
+            # return self.shake()
 
 
     # This function would perform the threeway handshake
@@ -130,7 +130,7 @@ class erateSocket(object):
             size = 20 + self.index
             frags = fragment(pkt,size)
             # frags[1][TCP].payload
-            rstring = ''.join(random.choice(string.ascii_letters + string.digits) for x in range(len(frags[1].payload)))
+            rstring = ''.join(random.choice(string.ascii_letters + string.digits) for x in range(len(frags[1][IP].payload)))
             dupfrag = frags[1].copy()
             dupfrag[IP].payload = rstring
             dupfrag[IP].proto = 6
@@ -148,21 +148,20 @@ class erateSocket(object):
             size = 20 + self.index
             frags = fragment(pkt,size)
             # frags[1] is where the keyword is
-            # We then move the offset of the key fragment towards the left for 8 bytes
-            frags[1][IP].frag = frags[1][IP].frag - 1
-            # We can move the offset of the key fragment towards the right for 8 bytes
-            # frags[1][IP].frag = frags[1][IP].frag + 1
+            # We then append 16 random bytes to the first fragment, which would then overlap with the keyword in second fragment
+            frags[0] = frags[0]/''.join(random.choice(string.ascii_letters + string.digits) for x in range(16))
+            frags[0].show2()
             pkts = frags
 
         elif self.change == 'TCP5':
             remain = data
             pkts = []
-            # In this case. self.index should be the number of fragments
+            # In this case. self.index should be the number of segments
             # Size is then the size of content in each packet
             size = len(data)/self.index
             baselen = 0
             # Put the first index - 1 segments into the list
-            for x in xrange(5-1):
+            for x in xrange(self.index-1):
                 part = remain[ :size]
                 remain = remain[size: ]
                 p = header.copy()
@@ -176,27 +175,106 @@ class erateSocket(object):
             p[TCP].seq += len(remain)
             pkts.append(p)
 
+        # Those are to infer the state maintain method, maybe implement separately
+        elif self.change == 'TCP7':
+            # TODO
+            randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
+            self.l4 = self.l4
+
         elif self.change == 'TCP8':
             # TODO
             randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
-            # send()
+            self.l4 = self.l4
         elif self.change == 'TCP9':
             # TODO
             randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
-            # send()
+            self.l4 = self.l4
         elif self.change == 'TCP10':
             # TODO
             randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
-            # send()
+            self.l4 = self.l4
+
         elif self.change == 'TCP14':
-            # TODO
-            self.l4 = self.l4
+            remain = data
+            pkts = []
+            # In this case. self.index should be the number of segments
+            # Size is then the size of content in each packet
+            size = len(data)/self.index
+            baselen = 0
+            # Put the first index - 1 segments into the list
+            for x in xrange(self.index-1):
+                part = remain[ :size]
+                remain = remain[size: ]
+                p = header.copy()
+                p[TCP].seq += (baselen + len(part))
+                pkts.append(p/part)
+                baselen += len(part)
+            # Adding the last part of the data
+            p = pkts[-1].copy()
+            # Now remain should have the rest of the payload
+            p[TCP].payload = remain
+            p[TCP].seq += len(remain)
+            pkts.append(p)
+            random.shuffle(pkts)
+
         elif self.change == 'TCP15':
-            # TODO
-            self.l4 = self.l4
+            remain = data
+            pkts = []
+            # In this case. self.index should be the beginning of the keyword, also the size of each segment
+            # i.e. if the keyword in 'I am happy' is 'happy', self.index should be 5
+            # This is to make sure that the keyword is in the second segment s2
+            size = self.index
+            numPackets = len(data)/size
+            baselen = 0
+            # Put the first index - 1 segments into the list
+            for x in xrange(numPackets-1):
+                part = remain[ :size]
+                remain = remain[size: ]
+                p = header.copy()
+                p[TCP].seq += (baselen + len(part))
+                pkts.append(p/part)
+                baselen += len(part)
+            # Adding the last part of the data
+            p = pkts[-1].copy()
+            # Now remain should have the rest of the payload
+            p[TCP].payload = remain
+            p[TCP].seq += len(remain)
+            pkts.append(p)
+            rstring = ''.join(random.choice(string.ascii_letters + string.digits) for x in range(len(pkts[1][TCP].payload)))
+            dupseg = pkts[1].copy()
+            dupseg[TCP].payload = rstring
+            dupseg[IP].proto = 6
+            # We then add a segment (same sequence as s2) with random string before or after it
+            pkts = [pkts[0]] + [dupseg] + pkts[1:]
+            # After it
+            # pkts = pkts[:2] + [dupseg] + pkts[2:]
+
         elif self.change == 'TCP16':
-            # TODO
-            self.l4 = self.l4
+            remain = data
+            pkts = []
+            # In this case. self.index should be the beginning of the keyword, also the size of each segment
+            # i.e. if the keyword in 'I am happy' is 'happy', self.index should be 5
+            # This is to make sure that the keyword is in the second segment s2
+            size = self.index
+            numPackets = len(data)/size
+            baselen = 0
+            # Put the first index - 1 segments into the list
+            for x in xrange(numPackets-1):
+                part = remain[ :size]
+                remain = remain[size: ]
+                p = header.copy()
+                p[TCP].seq += (baselen + len(part))
+                pkts.append(p/part)
+                baselen += len(part)
+            # Adding the last part of the data
+            p = pkts[-1].copy()
+            # Now remain should have the rest of the payload
+            p[TCP].payload = remain
+            p[TCP].seq += len(remain)
+            pkts.append(p)
+            # We then append 16 random bytes to the first segment, which would then overlap with the keyword in second segment
+            pkts[0] = pkts[0]/''.join(random.choice(string.ascii_letters + string.digits) for x in range(16))
+
         return pkts
 
     # The Insertion techniques:
@@ -262,9 +340,9 @@ class erateSocket(object):
             header[TCP].reserved = 6
         elif self.change == 'TCP13':
             header[TCP].flags = 'SFR'
-        elif self.change == 'TCP16':
-            header[TCP].options = [("AltChkSumOpt",'obsolete2')]
         elif self.change == 'TCP17':
+            header[TCP].options = [("AltChkSumOpt",'obsolete2')]
+        elif self.change == 'TCP18':
             header[TCP].options = [("AltChkSumOpt",'GET HTTP/1.1\r\nHost: netflix\r\n\r\n')]
         # No changes needed to be made
         else:
@@ -295,7 +373,7 @@ class erateSocket(object):
         response = sr(sendlist, verbose = False, retry = 1, multi = 1, timeout = self.timeout)
         # After sending the modified packet, increase the sequence number accordingly
         self.l4[TCP].seq += len(data)
-        return self.ProcessResponses(response[0])
+        # return self.ProcessResponses(response[0])
 
     # Process the responses received
     # Four cases:
