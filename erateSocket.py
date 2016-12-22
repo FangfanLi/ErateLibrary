@@ -2,20 +2,22 @@
 
 # Can be opened as erateSocket(Protocol, Change, Index, timeout)
 # Protocol specifies the protocol ('tcp' supported so far)
-# Change specifies the type of changes to be made on this packet, more info in method makeChange()
 # Index specifies the index that are needed for a change, more info in method makeChange()
 # timeout specifies how long we should aggregate the responses for each packet sent
+# changeType can be Insertion, Evasion or State
+# changeCode is to specify what changes in that suite to be applied
 
 from scapy.all import *
 import logging
 logger = logging.getLogger(__name__)
-import random, threading, string
+import random, threading, string, time
 
 class erateSocket(object):
-    def __init__(self, protocol,  change = '', index = 2, timeout = 0.5):
+    def __init__(self, protocol,  changeType = '', changeCode = '', index = 2, timeout = 0.5):
         self.protocol = protocol
         self.index = index
-        self.change = change
+        self.changeType = changeType
+        self.changeCode = changeCode
         self.srcIP = ''
         self.sport = 0
         self.dstIP = ''
@@ -25,11 +27,14 @@ class erateSocket(object):
         self.closed = False
         # This is the data that we would use when we insert packet, which contains the matching strings
         # can be changed
-        self.kdata = 'GET /someveryverygoodindex.html HTTP/1.1\r\n' +\
-             'Accept: */*\r\n' +\
-             'Host: www.netflix.com\r\n' +\
-             'Connection: Keep-Alive\r\n\r\n'
+        self.kdata = 'GET /ThisIsAnInsertedPacket HTTP/1.1\r\n' +\
+                     'Host: www.notclassify.com\r\n' +\
+                     'Accept: */*\r\n' +\
+                     'User-Agent: AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
+                     'Accept-Language: zh-cn\r\n'\
+                     'Connection: Keep-Alive\r\n\r\n'
         # This is for writing pipe
+        self.firstrequest = True
         self.w = None
         self.initseq = random.randrange(0,2**32)
         # Whether the first time receiving or sending a FIN packet
@@ -38,20 +43,52 @@ class erateSocket(object):
         self.recFinA = False
         self.sendFinA = False
 
-    def bind(self,srcAddress):
+    def bind(self,srcAddress,interface):
+        print '\n\t BINDING',srcAddress
         self.srcIP = srcAddress[0]
         self.sport = srcAddress[1]
+        # If port is not specified, let the OS pick one
+        if srcAddress[1] == 0:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(('',0))
+            freeport = sock.getsockname()[1]
+            sock.close()
+            self.sport = freeport
+        # If Insertion, we create a normal TCP socket on port 18888
+        self.interface = interface
+        if self.changeType == 'Insertion':
+            self.sni = threading.Thread(target=self.sniffer)
+            self.sni.start()
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.bind((srcAddress[0],self.sport))
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
 
     def connect(self, dstAddress):
         self.dstIP = dstAddress[0]
         self.dport = dstAddress[1]
-        # If it is a tcp connection, then we need to do handshake
-        if self.protocol == 'tcp':
-            # l4 stores the 'level 4' Info of the tcp stream, which will be used by scapy in making packets
-            self.l4 = IP(src=self.srcIP,dst=self.dstIP)/TCP(sport=self.sport, dport=self.dport, flags=0, seq=self.initseq, ack=0)
+        # l4 stores the 'level 4' Info of the tcp stream, which will be used by scapy in making packets
+        self.l4 = IP(src=self.srcIP,dst=self.dstIP)/TCP(sport=self.sport, dport=self.dport, flags=0, seq=self.initseq, ack=0)
+        # If Insertion, we connect with a normal TCP socket
+        if self.changeType == 'Insertion':
+            print '\n\t Insertion connecting'
+            self.sock.connect(dstAddress)
+            self.sni.join()
+        # If we need raw socket, then we need to do raw handshake
+        if self.changeType != 'Insertion':
             # This would then perform the three way handshake, calling send() is then allowed
-            # return self.shake()
+            return self.shake()
+
+    # A sniff thread, to get the first SYN/ACK from the server and update the l4 for Insertions
+    def sniffer(self):
+        # print '\n\t In sniffer'
+        build_lfilter = lambda (r): TCP in r and r[TCP].sport == self.dport and r[TCP].dport == self.sport
+        pkt = sniff(lfilter=build_lfilter, count=1, iface = self.interface, timeout = 0.5)
+        # print '\n\t Sniffed'
+        self.l4[TCP].seq = pkt[0][TCP].ack
+        self.l4[TCP].ack = pkt[0][TCP].seq + 1
+        return
 
 
     # This function would perform the threeway handshake
@@ -74,15 +111,6 @@ class erateSocket(object):
             return True
         return False
 
-    # Make changes based on self.change
-    def makechange(self, header, data):
-        pkts = self.makechangeI(header, data)
-        # If there is only one packet, means no insertion happened, we need to check whether there is I/E specified
-        if len(pkts) == 1:
-            pkts = self.makechangeE(header, data)
-        return pkts
-
-
     # The Evasion or Insertion/Evasion techniques, header is TCP/IP header, data is content
     # IP2: Break into Fragments
     # IP12: Out-of-order fragments
@@ -102,7 +130,7 @@ class erateSocket(object):
         if self.index == None:
             return pkts
 
-        if self.change == 'IP2':
+        if self.changeCode == 'IP2':
             # The index should specify how many fragments do we want
             # Assuming TCP header is 20 bytes
             pkt = header/data
@@ -111,7 +139,7 @@ class erateSocket(object):
             # Return the fragments
             pkts = frags
 
-        elif self.change == 'IP12':
+        elif self.changeCode == 'IP12':
             pkt = header/data
             # The index should specify how many fragments do we want
             # Assuming TCP header is 20 bytes
@@ -121,7 +149,7 @@ class erateSocket(object):
             random.shuffle(frags)
             pkts = frags
 
-        elif self.change == 'IP13':
+        elif self.changeCode == 'IP13':
             pkt = header/data
             # In this case. self.index should be the beginning of the keyword
             # i.e. if the keyword in 'I am happy' is 'happy', self.index should be 5
@@ -139,7 +167,7 @@ class erateSocket(object):
             # After it
             # pkts = frags[:2] + [dupfrag] + frags[2:]
 
-        elif self.change == 'IP14':
+        elif self.changeCode == 'IP14':
             pkt = header/data
             # In this case. self.index should be the beginning of the keyword
             # i.e. if the keyword in 'I am happy' is 'happy', self.index should be 5
@@ -150,10 +178,10 @@ class erateSocket(object):
             # frags[1] is where the keyword is
             # We then append 16 random bytes to the first fragment, which would then overlap with the keyword in second fragment
             frags[0] = frags[0]/''.join(random.choice(string.ascii_letters + string.digits) for x in range(16))
-            frags[0].show2()
+            # frags[0].show2()
             pkts = frags
 
-        elif self.change == 'TCP5':
+        elif self.changeCode == 'TCP5':
             remain = data
             pkts = []
             # In this case. self.index should be the number of segments
@@ -176,25 +204,25 @@ class erateSocket(object):
             pkts.append(p)
 
         # Those are to infer the state maintain method, maybe implement separately
-        elif self.change == 'TCP7':
+        elif self.changeCode == 'TCP7':
             # TODO
             randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
             self.l4 = self.l4
 
-        elif self.change == 'TCP8':
+        elif self.changeCode == 'TCP8':
             # TODO
             randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
             self.l4 = self.l4
-        elif self.change == 'TCP9':
+        elif self.changeCode == 'TCP9':
             # TODO
             randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
             self.l4 = self.l4
-        elif self.change == 'TCP10':
+        elif self.changeCode == 'TCP10':
             # TODO
             randomData = ''.join(random.choice(string.ascii_uppercase + string.ascii_lowercase + string.digits) for _ in range(400))
             self.l4 = self.l4
 
-        elif self.change == 'TCP14':
+        elif self.changeCode == 'TCP14':
             remain = data
             pkts = []
             # In this case. self.index should be the number of segments
@@ -217,7 +245,7 @@ class erateSocket(object):
             pkts.append(p)
             random.shuffle(pkts)
 
-        elif self.change == 'TCP15':
+        elif self.changeCode == 'TCP15':
             remain = data
             pkts = []
             # In this case. self.index should be the beginning of the keyword, also the size of each segment
@@ -249,7 +277,7 @@ class erateSocket(object):
             # After it
             # pkts = pkts[:2] + [dupseg] + pkts[2:]
 
-        elif self.change == 'TCP16':
+        elif self.changeCode == 'TCP16':
             remain = data
             pkts = []
             # In this case. self.index should be the beginning of the keyword, also the size of each segment
@@ -297,83 +325,88 @@ class erateSocket(object):
     # TCP13: Invalid Flag
     # TCP17: Invalid Options
     # TCP18: Long Data Offset but short Option Length, hide keyword in Padding
-    # The inserted packet contains data with keywords specified as self.kdata
-    def makechangeI(self, header, data):
+    # The inserted packet contains data with data specified as self.kdata
+    # Send out one desired packet according to the code before sending data
+    def Insertion(self, header, data):
         header_origin = header.copy()
-        pkts = [header_origin/data]
-        if self.change == 'IP1':
+        pkt = header_origin/data
+        #pkt.show2()
+        if self.changeCode == 'IP1':
             header[IP].ttl = self.index
-        elif self.change == 'IP3':
+        elif self.changeCode == 'IP3':
             header[IP].version = 5
-        elif self.change == 'IP4':
+        elif self.changeCode == 'IP4':
             header[IP].ihl = 16
-        elif self.change == 'IP5':
+        elif self.changeCode == 'IP5':
             # Set arbitrary length
             header[IP].len = 800
-        elif self.change == 'IP6':
+        elif self.changeCode == 'IP6':
             # Hard coded short length, only 40 bytes, if there is HTTP content, is definitely after 40 bytes
             header[IP].len = 40
-        elif self.change == 'IP7':
+        elif self.changeCode == 'IP7':
             header[IP].proto = 17
-        elif self.change == 'IP8':
+        elif self.changeCode == 'IP8':
             header[IP].chksum = 88
-        elif self.change == 'IP9':
+        elif self.changeCode == 'IP9':
             # Some action with 38 'a's
             header[IP].options = [IPOption('%s%s'%('\xa0\x28','a'*38))]
-        elif self.change == 'IP10':
+        elif self.changeCode == 'IP10':
             # The option is deprecated
             header[IP].options = [IPOption('%s%s'%('\x88\x04','a'*2))]
-        elif self.change == 'IP11':
+        elif self.changeCode == 'IP11':
             # Hide keyword in the option
             # Hardcoded length and keyword, can be changed
             header[IP].options = [IPOption('%s%s'%('\x86\x10','Host: netflix'))]
-        elif self.change == 'TCP2':
+        elif self.changeCode == 'TCP2':
             # Decrease ack number, which is not valid
             header[TCP].ack -= 88
-        elif self.change == 'TCP3':
+        elif self.changeCode == 'TCP3':
             header[TCP].chksum = 88
-        elif self.change == 'TCP4':
+        elif self.changeCode == 'TCP4':
             header[TCP].flags = 'P'
-        elif self.change == 'TCP11':
+        elif self.changeCode == 'TCP11':
             header[TCP].dataofs = 16
-        elif self.change == 'TCP12':
+        elif self.changeCode == 'TCP12':
             header[TCP].reserved = 6
-        elif self.change == 'TCP13':
+        elif self.changeCode == 'TCP13':
             header[TCP].flags = 'SFR'
-        elif self.change == 'TCP17':
+        elif self.changeCode == 'TCP17':
             header[TCP].options = [("AltChkSumOpt",'obsolete2')]
-        elif self.change == 'TCP18':
+        elif self.changeCode == 'TCP18':
             header[TCP].options = [("AltChkSumOpt",'GET HTTP/1.1\r\nHost: netflix\r\n\r\n')]
-        # No changes needed to be made
-        else:
-            return pkts
         # We insert one packets if changes are made
-        pktslist = [header/self.kdata] + pkts
-        return pktslist
-
+        pkt = Ether()/header/self.kdata
+        # We send out this packet and won't care about the response
+        if self.firstrequest == True:
+            # print '\n\t InsertING'
+            # pkt.show2()
+            # sendp(pkt, verbose=False, iface = self.interface)
+            self.firstrequest = False
 
 
     # This function sends data out
     # And will process the data received, return after all responses for this request is received
     def sendall(self, data):
+        # If insertion, insert the desired packet before sending this data out
         self.l4[TCP].flags = 'A'
         header = self.l4.copy()
-        sendlist = [header/data]
-        # print '\n\tBefore Changing'
-        # p.show2()
-        if self.change != '':
-            sendlist = self.makechange(header, data)
-        print '\n\t SENDING DATA!'
-        # If there are multiple packets, we first send out all but the last one
-        # if len(sendlist) > 1:
-        #     for packet in sendlist[ : -1]:
-        #         # packet.show2()
-        #         send(packet, verbose = False)
-        # After sending out the last one, we aggregate the response
-        response = sr(sendlist, verbose = False, retry = 1, multi = 1, timeout = self.timeout)
-        # After sending the modified packet, increase the sequence number accordingly
-        self.l4[TCP].seq += len(data)
-        # return self.ProcessResponses(response[0])
+        if self.changeType == 'Insertion':
+            self.Insertion(header,data)
+            time.sleep(1)
+            # Let it be classified first, then send out the data through real socket
+            self.sock.sendall(data)
+        # Else we need to do raw communication (Evasion)
+        else:
+            sendlist = [header/data]
+            # print '\n\tBefore Changing'
+            # p.show2()
+            if self.changeCode != '':
+                sendlist = self.makechangeE(header, data)
+            print '\n\t SENDING DATA!'
+            response = sr(sendlist, verbose = False, retry = 1, multi = 1, timeout = self.timeout)
+            # After sending the modified packet, increase the sequence number accordingly
+            self.l4[TCP].seq += len(data)
+            return self.ProcessResponses(response[0])
 
     # Process the responses received
     # Four cases:
@@ -424,20 +457,25 @@ class erateSocket(object):
             self.w.write('Select Can Return')
             return 1
 
-
     # This function is used to return data that received
     # Only return data if there is data beyond TCP layer
     def recv(self, Bufsize):
-        # Return the buf that we received
-        returnv = self.buf[ : Bufsize]
-        self.buf = self.buf[Bufsize: ]
-        return returnv
+        # For insertions, just return the right socket
+        if self.changeType == 'Insertion':
+            return self.sock.recv(Bufsize)
+        else:
+            # Return the buf that raw socket received
+            returnv = self.buf[ : Bufsize]
+            self.buf = self.buf[Bufsize: ]
+            return returnv
 
     # This function is used by select.select, once there is data received,
     # the fileno should be ready to return
     def fileno(self):
-        print '* FILENO GETTING CALLED'
-        return self.readP
+        if self.changeType == 'Insertion':
+            return self.sock.fileno()
+        else:
+            return self.readP
 
     # This function is to perform a complete three way fin process
     # TODO: If there if more data after we sent FIN, grace FIN
@@ -459,7 +497,9 @@ class erateSocket(object):
     # If not closed yet, it would perform three way closing
     # and stop the receiving thread by setting do_run to False
     def close(self):
-        if self.closed == False:
+        if self.changeType == 'Insertion':
+            return self.sock.close()
+        elif self.closed == False:
             print '\n\t *SENDING FIN'
             self.CompleteFin()
 
