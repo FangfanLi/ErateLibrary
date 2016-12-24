@@ -27,8 +27,16 @@ class erateSocket(object):
         self.closed = False
         # This is the data that we would use when we insert packet, which contains the matching strings
         # can be changed
-        self.kdata = 'GET /ThisIsAnInsertedPacket HTTP/1.1\r\n' +\
-                     'Host: www.notclassify.com\r\n' +\
+        # self.kdata = 'GET /ThisIsAnInsertedPacket HTTP/1.1\r\n' +\
+        #              'Host: djmcau1gdkhrg.cloudfront.net\r\n' +\
+        #              'Accept: */*\r\n' +\
+        #              'User-Agent: AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
+        #              'Accept-Language: zh-cn\r\n'\
+        #              'Connection: Keep-Alive\r\n\r\n'
+        self.kdata = 'GET /503/60411503/agave50627591_24713015_H264_3200.tar/segment0.ts?br=3200&end=20160115171327&authToken=03649c75e658aabee2165 HTTP/1.1\r\n' \
+                     'X-rr: 129.10.9.28;Hulu-video;010.011.004.003.52624-008.254.207.190.00080\r\n' \
+                     'Host: httpls-1.notclassify.com\r\n' \
+                     'X-Playback-Session-Id: E9A48165-8A60-4F72-83C6-9ACD06ED6EDC\r\n' \
                      'Accept: */*\r\n' +\
                      'User-Agent: AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
                      'Accept-Language: zh-cn\r\n'\
@@ -44,7 +52,6 @@ class erateSocket(object):
         self.sendFinA = False
 
     def bind(self,srcAddress,interface):
-        print '\n\t BINDING',srcAddress
         self.srcIP = srcAddress[0]
         self.sport = srcAddress[1]
         # If port is not specified, let the OS pick one
@@ -54,6 +61,7 @@ class erateSocket(object):
             freeport = sock.getsockname()[1]
             sock.close()
             self.sport = freeport
+        print '\n\t BINDING',self.srcIP,self.sport
         # If Insertion, we create a normal TCP socket on port 18888
         self.interface = interface
         if self.changeType == 'Insertion':
@@ -88,6 +96,10 @@ class erateSocket(object):
         # print '\n\t Sniffed'
         self.l4[TCP].seq = pkt[0][TCP].ack
         self.l4[TCP].ack = pkt[0][TCP].seq + 1
+        self.Esrc = pkt[0][Ether].dst
+        self.Edst = pkt[0][Ether].src
+        self.Etype = pkt[0][Ether].type
+        # print self.Esrc, self.Edst
         return
 
 
@@ -113,6 +125,7 @@ class erateSocket(object):
 
     # The Evasion or Insertion/Evasion techniques, header is TCP/IP header, data is content
     # IP2: Break into Fragments
+    # IP11: Long IHL, hide keyword in Padding
     # IP12: Out-of-order fragments
     # IP13: Duplicated fragments
     # IP14: Overlapping fragments
@@ -123,6 +136,7 @@ class erateSocket(object):
     # TCP14: Out-of-order segments
     # TCP15: Duplicated segments
     # TCP16: Overlapping segments
+    # TCP18: Long Data Offset but short Option Length, hide keyword in Padding
 
     def makechangeE(self, header, data):
         # To make changes with content in consideration, the index value is needed
@@ -138,6 +152,11 @@ class erateSocket(object):
             frags = fragment(pkt,size)
             # Return the fragments
             pkts = frags
+
+        elif self.changeCode == 'IP11':
+            # Hide keyword in the option
+            # Hardcoded length and keyword, can be changed
+            header[IP].options = [IPOption('%s%s'%('\x86\x10','Host: cloudfront'))]
 
         elif self.changeCode == 'IP12':
             pkt = header/data
@@ -303,6 +322,9 @@ class erateSocket(object):
             # We then append 16 random bytes to the first segment, which would then overlap with the keyword in second segment
             pkts[0] = pkts[0]/''.join(random.choice(string.ascii_letters + string.digits) for x in range(16))
 
+        # TCP18: Long Data Offset but short Option Length, hide keyword in Padding
+        elif self.changeCode == 'TCP18':
+            header[TCP].options = [("AltChkSumOpt",'GET HTTP/1.1\r\nHost: cloudfront.net\r\n\r\n')]
         return pkts
 
     # The Insertion techniques:
@@ -315,22 +337,18 @@ class erateSocket(object):
     # IP8: Invalid Checksum
     # IP9: Invalid Options
     # IP10: Deprecated Options
-    # IP11: Long IHL, hide keyword in Padding
     # TCP2: Wrong ACK number
     # TCP3: Invalid Checksum
     # TCP4: Not ACK
     # TCP6: Send RST with low TTL
     # TCP11: Invalid Data Offset
-    # TCP12: Invalid Reserved bits
     # TCP13: Invalid Flag
-    # TCP17: Invalid Options
-    # TCP18: Long Data Offset but short Option Length, hide keyword in Padding
     # The inserted packet contains data with data specified as self.kdata
     # Send out one desired packet according to the code before sending data
     def Insertion(self, header, data):
+        if self.changeCode == '':
+            return
         header_origin = header.copy()
-        pkt = header_origin/data
-        #pkt.show2()
         if self.changeCode == 'IP1':
             header[IP].ttl = self.index
         elif self.changeCode == 'IP3':
@@ -344,6 +362,7 @@ class erateSocket(object):
             # Hard coded short length, only 40 bytes, if there is HTTP content, is definitely after 40 bytes
             header[IP].len = 40
         elif self.changeCode == 'IP7':
+            # Change it to UDP
             header[IP].proto = 17
         elif self.changeCode == 'IP8':
             header[IP].chksum = 88
@@ -353,36 +372,30 @@ class erateSocket(object):
         elif self.changeCode == 'IP10':
             # The option is deprecated
             header[IP].options = [IPOption('%s%s'%('\x88\x04','a'*2))]
-        elif self.changeCode == 'IP11':
-            # Hide keyword in the option
-            # Hardcoded length and keyword, can be changed
-            header[IP].options = [IPOption('%s%s'%('\x86\x10','Host: netflix'))]
         elif self.changeCode == 'TCP2':
-            # Decrease ack number, which is not valid
-            header[TCP].ack -= 88
+            # Decrease seq number, which is not valid
+            header[TCP].seq -= 18321
         elif self.changeCode == 'TCP3':
             header[TCP].chksum = 88
         elif self.changeCode == 'TCP4':
             header[TCP].flags = 'P'
         elif self.changeCode == 'TCP11':
             header[TCP].dataofs = 16
-        elif self.changeCode == 'TCP12':
-            header[TCP].reserved = 6
         elif self.changeCode == 'TCP13':
             header[TCP].flags = 'SFR'
-        elif self.changeCode == 'TCP17':
-            header[TCP].options = [("AltChkSumOpt",'obsolete2')]
-        elif self.changeCode == 'TCP18':
-            header[TCP].options = [("AltChkSumOpt",'GET HTTP/1.1\r\nHost: netflix\r\n\r\n')]
         # We insert one packets if changes are made
-        pkt = Ether()/header/self.kdata
+        pkt = Ether(src = self.Esrc, dst = self.Edst, type=self.Etype)/header/self.kdata
         # We send out this packet and won't care about the response
         if self.firstrequest == True:
-            # print '\n\t InsertING'
+            print '\n\t InsertING'
             # pkt.show2()
-            # sendp(pkt, verbose=False, iface = self.interface)
+            sendp(pkt, verbose=False, iface = self.interface)
+            # Send Some GIbberish to fill the classifier's buffer
+            # for i in xrange(7):
+            #     rstring = ''.join(random.choice(string.ascii_letters + string.digits) for x in range(1400))
+            #     time.sleep(0.01)
+            #     sendp(Ether(src = self.Esrc, dst = self.Edst, type=self.Etype)/header/rstring, verbose=False, iface = self.interface)
             self.firstrequest = False
-
 
     # This function sends data out
     # And will process the data received, return after all responses for this request is received
