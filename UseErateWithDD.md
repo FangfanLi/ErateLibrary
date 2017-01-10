@@ -51,7 +51,8 @@ Copy the erateSocket.py (downloaded from Github repo) into local directory where
 
 * Comment out everything in \_connect\_socket(), replace with the following three lines:
 
-```python self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Insertion', changeCode = '', index = 20, timeout = 0.5)
+```python 
+self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Insertion', changeCode = '', index = 20, timeout = 0.5)
 self.sock.bind((Configs().get('publicIP'), 0),Configs().get('iface'))
 self.sock.connect(self.dst_instance)
 ```
