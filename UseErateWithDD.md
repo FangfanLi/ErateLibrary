@@ -32,7 +32,6 @@ self.ips = {
                     ‘FanServer'           : ‘4.3.2.1’,
                    }
 ```
-
 * run: python replay\_client.py —pcap\_folder=/WhereTheParsedPcapsAreOnYouMachine --serverInstance=FanServer
 
 * You should be able to run the replay now.
