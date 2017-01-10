@@ -25,7 +25,7 @@ Now the replay trace should be loaded (you should be able to see a this — Load
 Your local machine where the Differentiation Detector is.
 
 * In python\_lib.py, find the Instance class, and add your server and its IP addresses into self.ips. For example if FanServer is the name I want to use for my server, and its IP is ‘4.3.2.1’, it becomes: ```python
- self.ips = {
+self.ips = {
                     'yourInstanceName'    : 'yourInstanceAddress',
                     'example1'            : 'my.example1.com',
                     'example2'            : '1.2.3.4',
