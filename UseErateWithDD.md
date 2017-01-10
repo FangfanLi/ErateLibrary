@@ -25,7 +25,9 @@ Now the replay trace should be loaded (you should be able to see a this — Load
 Your local machine where the Differentiation Detector is.
 
 * In python\_lib.py, find the Instance class, and add your server and its IP addresses into self.ips. For example if FanServer is the name I want to use for my server, and its IP is ‘4.3.2.1’, it becomes:
- ```python self.ips = {
+
+```python 
+self.ips = {
                     'yourInstanceName'    : 'yourInstanceAddress',
                     'example1'            : 'my.example1.com',
                     'example2'            : '1.2.3.4',
@@ -33,6 +35,7 @@ Your local machine where the Differentiation Detector is.
                    }
 ```
 * run: python replay\_client.py —pcap\_folder=/WhereTheParsedPcapsAreOnYouMachine --serverInstance=FanServer
+
 
 * You should be able to run the replay now.
 
@@ -59,7 +62,8 @@ self.sock.connect(self.dst_instance)
 
 * Now you can change the settings of the erateSocket to perform some Insertion tricks by setting different changeCode when creating the erateSocket. 
 
-* For example, if you do: 
+* For example, if you do:
+
 ```python
 self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Insertion', changeCode = 'IP1', index = 20, timeout = 0.5)
 ```
@@ -110,6 +114,7 @@ pf enabled
 **Evasion techniques**
 
 Now you can set the erateSocket by:
+
 ```python
 self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Evasion', changeCode = 'IP1', index = 2, timeout = 0.5)
 ```
