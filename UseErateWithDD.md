@@ -24,13 +24,14 @@ Now the replay trace should be loaded (you should be able to see a this — Load
 
 Your local machine where the Differentiation Detector is.
 
-* In python\_lib.py, find the Instance class, and add your server and its IP addresses into self.ips. For example if FanServer is the name I want to use for my server, and its IP is ‘4.3.2.1’, it becomes: 
+* In python\_lib.py, find the Instance class, and add your server and its IP addresses into self.ips. For example if FanServer is the name I want to use for my server, and its IP is ‘4.3.2.1’, it becomes: ```python
  self.ips = {
                     'yourInstanceName'    : 'yourInstanceAddress',
                     'example1'            : 'my.example1.com',
                     'example2'            : '1.2.3.4',
                     ‘FanServer'           : ‘4.3.2.1’,
                    }
+```
 
 * run: python replay\_client.py —pcap\_folder=/WhereTheParsedPcapsAreOnYouMachine --serverInstance=FanServer
 
@@ -50,7 +51,7 @@ Copy the erateSocket.py (downloaded from Github repo) into local directory where
 ```python
 self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Insertion', changeCode = '', index = 20, timeout = 0.5)
 self.sock.bind((Configs().get('publicIP'), 0),Configs().get('iface'))
-self.sock.connect(self.dst\_instance)
+self.sock.connect(self.dst_instance)
 ```
 
 * The settings of those parameters are documented and now everything would be sent out via the erateSocket. 
@@ -59,7 +60,10 @@ self.sock.connect(self.dst\_instance)
 
 * Now you can change the settings of the erateSocket to perform some Insertion tricks by setting different changeCode when creating the erateSocket. 
 
-* For example, if you do: self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Insertion', changeCode = 'IP1', index = 20, timeout = 0.5).
+* For example, if you do: 
+```python
+self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Insertion', changeCode = 'IP1', index = 20, timeout = 0.5)
+```
 When running replay\_client.py, a packet (the payload of the inserted packet is now hard coded in erateSocket.py as self.kdata in erateSocket class) with low TTL (20 as set by the parameter ‘index’) would be sent out before sending the real data, you can check it by opening up WireShark and listening on the interface while doing the replay.
 
 * The meaning of different changeCode are described in the paper and also documented in the code.
@@ -107,8 +111,9 @@ pf enabled
 **Evasion techniques**
 
 Now you can set the erateSocket by:
-
+```python
 self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Evasion', changeCode = 'IP1', index = 2, timeout = 0.5)
+```
 
 Which would fragment the first request into 2 fragments.
 
