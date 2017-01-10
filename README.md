@@ -5,7 +5,6 @@ This README would normally document whatever steps are necessary to get your app
 ### What is this repository for? ###
 
 * The Erate socket library
-* [Learn Markdown](https://bitbucket.org/tutorials/markdowndemo)
 * Install Scapy before using the library : http://www.secdev.org/projects/scapy/
 * You need a linux machine for changing the socket's functionality (i.e., different *change* parameters)
 * Make sure setting a rule in *iptables* that drops outgoing TCP RST packets. Otherwise since the kernel would now know that the erateSocket is running, it would respond packets destined for your program with TCP RSTs:
