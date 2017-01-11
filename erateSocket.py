@@ -214,20 +214,20 @@ class erateSocket(object):
             # In this case. self.index should be the number of segments
             # Size is then the size of content in each packet
             size = len(data)/self.index
-            baselen = 0
+            baseseq = header[TCP].seq
             # Put the first index - 1 segments into the list
             for x in xrange(self.index-1):
                 part = remain[ :size]
                 remain = remain[size: ]
                 p = header.copy()
-                p[TCP].seq += (baselen + len(part))
+                p[TCP].seq = baseseq
                 pkts.append(p/part)
-                baselen += len(part)
+                baseseq += len(part)
             # Adding the last part of the data
             p = pkts[-1].copy()
             # Now remain should have the rest of the payload
             p[TCP].payload = remain
-            p[TCP].seq += len(remain)
+            p[TCP].seq += size
             pkts.append(p)
 
         elif self.changeCode == 'TCP2':
@@ -236,21 +236,22 @@ class erateSocket(object):
             # In this case. self.index should be the number of segments
             # Size is then the size of content in each packet
             size = len(data)/self.index
-            baselen = 0
+            baseseq = header[TCP].seq
             # Put the first index - 1 segments into the list
             for x in xrange(self.index-1):
                 part = remain[ :size]
                 remain = remain[size: ]
                 p = header.copy()
-                p[TCP].seq += (baselen + len(part))
+                p[TCP].seq = baseseq
                 pkts.append(p/part)
-                baselen += len(part)
+                baseseq += len(part)
             # Adding the last part of the data
             p = pkts[-1].copy()
             # Now remain should have the rest of the payload
             p[TCP].payload = remain
-            p[TCP].seq += len(remain)
+            p[TCP].seq += size
             pkts.append(p)
+            # Shuffle the segments
             random.shuffle(pkts)
 
         elif self.changeCode == 'TCP3':
