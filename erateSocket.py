@@ -102,6 +102,7 @@ class erateSocket(object):
         print '\n\t Sniffed'
         self.l4[TCP].seq = pkt[0][TCP].ack
         self.l4[TCP].ack = pkt[0][TCP].seq + 1
+        self.l4[TCP].dport = pkt[0][TCP].sport
         self.l4[IP].dst = pkt[0][IP].src
         self.l4[IP].src = pkt[0][IP].dst
         self.Esrc = pkt[0][Ether].dst
