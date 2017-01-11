@@ -385,7 +385,7 @@ class erateSocket(object):
         header = l3header/l4header
         if self.changeType == 'Insertion':
             self.Insertion(header,data)
-            time.sleep(1)
+            # time.sleep(0.1)
             # Let it be classified first, then send out the data through real socket
             self.sock.sendall(data)
         # Else we need to do raw communication (Evasion)
