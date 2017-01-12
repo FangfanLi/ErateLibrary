@@ -46,6 +46,7 @@ class erateSocket(object):
         self.sendFinA = False
 
     def bind(self,srcAddress,interface):
+        self.interface = interface
         self.srcIP = srcAddress[0]
         self.sport = srcAddress[1]
         # If port is not specified, let the OS pick one
@@ -57,15 +58,28 @@ class erateSocket(object):
             self.sport = freeport
         # print '\n\t BINDING',self.srcIP,self.sport
         # l4 stores the 'level 4' Info of the tcp stream, which will be used by Scapy in making packets
-        self.l4 = IP(src=self.srcIP,dst=self.dstIP)/TCP(sport=self.sport, dport=self.dport, flags=0, seq=self.initseq, ack=0)
-        # If Insertion, we create a normal TCP socket on
-        self.interface = interface
-        self.sni = threading.Thread(target=self.sniffer)
-        self.sni.start()
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.bind((srcAddress[0],self.sport))
-        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if self.protocol == 'tcp':
+            self.l4 = IP(src=self.srcIP,dst=self.dstIP)/TCP(sport=self.sport, dport=self.dport, flags=0, seq=self.initseq, ack=0)
+            # If Insertion, we create a normal TCP socket on
+            self.sni = threading.Thread(target=self.sniffer)
+            self.sni.start()
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.bind((srcAddress[0],self.sport))
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        elif self.protocol == 'udp':
+            self.l4 = IP(src=self.srcIP,dst=self.dstIP)/UDP(sport=self.sport, dport=self.dport)
+            # If Insertion, we create a normal UDP socket on
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.bind((srcAddress[0],self.sport))
+            # meta info about the other end is also needed
+            # Get ethernet, network configs also by a three way handshake as in TCP
+            self.sni = threading.Thread(target=self.sniffer)
+            self.sni.start()
+            self.shakesock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.shakesock.bind((srcAddress[0],self.sport))
+            self.shakesock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.shakesock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
 
 
@@ -80,19 +94,12 @@ class erateSocket(object):
         # For evasion, then we just use the Information collected from the three way handshake and then close the
         # Python socket
         elif self.changeType == 'Evasion':
-            self.sock.close()
-            # We would find another source port that is different than the one we used for the previous handshake
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(('',0))
-            freeport = sock.getsockname()[1]
-            sock.close()
-            self.sport = freeport
-            # Update l4 here
-            self.l4 = IP(src=self.srcIP,dst=self.dstIP)/TCP(sport=self.sport, dport=self.dport, flags=0, seq=self.initseq, ack=0)
-            # This is the Ethernet header which will be used for srp() and sendp()
-            print '\n\t source IP and source port Used',self.srcIP,self.sport
-            # Then we start from the raw handshake
-            return self.shake()
+            # We would just use the channel created by the previous three way handshake
+            print '\n\t Raw connection'
+            # This is used for returning when select.selct() gets called on this erateSocket
+            self.readP, self.writeP = os.pipe()
+
+
 
     # A sniff thread, to get the first SYN/ACK from the server and update the l4 for Insertions
     def sniffer(self):
@@ -112,34 +119,6 @@ class erateSocket(object):
         self.dstIP = pkt[0][IP].src
         self.l3 = Ether(src = self.Esrc, dst = self.Edst, type=self.Etype)
         return
-
-
-    # This function would perform the threeway handshake
-    # 1. Send SYN, get SYN/ACK, adjust Sequence and ACK number accordingly
-    # Start the listening thread
-    # The changes need to be considered when handshaking
-    # TCP1: First SYN with low TTL (not able to reach the end host)
-    def shake(self):
-        print '\n\t Performing RAW Handshake'
-        time.sleep(1)
-        self.l4[TCP].flags = "S"
-        # The pipe is created for fileno(), which are used by select.selct
-        self.readP, self.writeP = os.pipe()
-        # self.l4.show2()
-        response = srp(self.l3/self.l4, verbose = False, iface = self.interface, timeout=self.timeout)
-        # The response of srp is a tuple of two elements
-        # One list of Answered results and another with unanswered ones
-        # The elements in the answered list are tuples
-        # Where the first element is the one sent out and the second is the response that it gets for that
-        # We need the first response in the answered list
-        if response[0][0][1][TCP].flags & 0x3f == 0x12: # SYN+ACK
-            self.l4[TCP].seq += 1
-            self.l4[TCP].ack = response[0][0][1][TCP].seq+1
-            self.l4[TCP].flags = "A"
-            send(self.l4, verbose = False)
-            # print '\r\n Handshake succeed!'
-            return True
-        return False
 
     # The Evasion techniques, header is TCP/IP header, data is content
     # IP1: Break into Fragments
@@ -376,6 +355,37 @@ class erateSocket(object):
             print '\n\t InsertING'
             sendp(pkt, verbose=False, iface = self.interface)
             self.firstrequest = False
+
+    # This function is used when sending UDP
+    def sendto(self, data, dstAddress):
+        # If insertion, insert the desired packet before sending this data out
+        l3header = self.l3.copy()
+        l4header = self.l4.copy()
+        header = l3header/l4header
+        if self.changeType == 'Insertion':
+            self.Insertion(header,data)
+            # time.sleep(0.1)
+            # Let it be classified first, then send out the data through real socket
+            self.sock.sendall(data)
+        # Else we need to do raw communication (Evasion)
+        elif self.changeType == 'Evasion':
+            sendlist = [header/data]
+            # print '\n\tBefore Changing'
+            # p.show2()
+            # We only change the first packet so far
+            if self.firstrequest == True:
+                if self.changeCode != '':
+                    sendlist = self.makechangeE(header, data)
+                self.firstrequest = False
+            print '\n\t SENDING DATA!'
+            response = srp(sendlist, verbose = False, multi = 1, timeout = self.timeout, iface = self.interface)
+            # After sending the modified packet, increase the sequence number accordingly
+            self.l4[TCP].seq += len(data)
+            # We then need to process the response of the last fragments that we sent out
+            # Which should be the response of the whole packet before fragmentation
+            # print '\n\t RS', response
+            # print '\n\t RS0', response[0]
+            return self.ProcessResponses(response[0])
 
     # This function sends data out
     # And will process the data received, return after all responses for this request is received
