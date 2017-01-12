@@ -97,7 +97,7 @@ class erateSocket(object):
     # A sniff thread, to get the first SYN/ACK from the server and update the l4 for Insertions
     def sniffer(self):
         # print '\n\t In sniffer'
-        build_lfilter = lambda (r): TCP in r and r[TCP].sport == self.dport and r[TCP].dport == self.sport
+        build_lfilter = lambda (r): TCP in r and r[TCP].dport == self.sport
         pkt = sniff(lfilter=build_lfilter, count=1, iface = self.interface, timeout=self.timeout)
         print '\n\t Sniffed'
         self.l4[TCP].seq = pkt[0][TCP].ack
@@ -339,8 +339,8 @@ class erateSocket(object):
         elif self.changeCode == 'IP3':
             header[IP].ihl = 16
         elif self.changeCode == 'IP4':
-            # Set arbitrary length
-            header[IP].len = 800
+            # Set arbitrary length, 800 bytes longer
+            header[IP].len = len(data) + 800
         elif self.changeCode == 'IP5':
             # Hard coded short length, only 40 bytes, if there is HTTP content, is definitely after 40 bytes
             header[IP].len = 40
