@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 import random, threading, string, time, commands
 
 class erateSocket(object):
-    def __init__(self, protocol,  changeType = '', changeCode = '', index = 2, timeout = 0.5):
+    def __init__(self, protocol,  changeType = '', changeCode = '', index = 2, insertNum = 1, insertSize = 0, timeout = 0.5):
         self.protocol = protocol
         self.index = index
         self.changeType = changeType
@@ -27,15 +27,16 @@ class erateSocket(object):
         self.closed = False
         # This is the data that we would use when we insert packet, which contains the matching strings
         # can be changed
-        # self.kdata = 'GET /503/60411503/agave50627591_24713015_H264_3200.tar/segment0.ts?br=3200&end=20160115171327&authToken=03649c75e658aabee2165 HTTP/1.1\r\n' \
-        #              'X-rr: 129.10.9.28;Hulu-video;010.011.004.003.52624-008.254.207.190.00080\r\n' \
-        #              'Host: httpls-1.facebook.com\r\n' \
-        #              'X-Playback-Session-Id: E9A48165-8A60-4F72-83C6-9ACD06ED6EDC\r\n' \
-        #              'Accept: */*\r\n' +\
-        #              'User-Agent: AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
-        #              'Accept-Language: zh-cn\r\n'\
-        #              'Connection: Keep-Alive\r\n\r\n'
-        self.kdata = 'Break'
+        self.kdata = 'GET /dm/1$AK6OCP5ZLUJI1,36A60F17/vcid$39220608800/mpid$ATVPDKIKX0DER/type$FullVideo/videoMinBitrate$50000/videoquality$1080p/5059/0d51/a21f/47cd-a673-53908c821902/e0fceca1-f78d-4d7d-a948-60d45a856698_v9.m3u8 HTTP/1.1\r\n' \
+                     'Host: djmcau1gdkhrg.cloudfront.net\r\n' \
+                     'X-Playback-Session-Id: 1E67538B-8C90-4997-B238-48372837EE69\r\n' \
+                     'Accept: */*\r\n'\
+                     'AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
+                     'Accept-Language: zh-cn\r\n'\
+                     'Connection: Keep-Alive\r\n\r\n'
+        self.insertSize = insertSize
+        self.insertNum = insertNum
+        # self.kdata = 'Break'
         # This is for writing pipe
         self.firstrequest = True
         self.w = None
@@ -94,7 +95,7 @@ class erateSocket(object):
         if self.changeType == 'Insertion':
             self.tcpsock.connect(dstAddress)
             self.sni.join()
-            print '\n\t Insertion connecting'
+            # print '\n\t Insertion connecting'
         # For evasion, then we just use the Information collected from the three way handshake and then close the
         # Python socket
         elif self.changeType == 'Evasion':
@@ -361,8 +362,8 @@ class erateSocket(object):
     # TCP4: Invalid Data Offset
     # TCP5: Invalid Flag
     # The inserted packet contains data with data specified as self.kdata
-    # Send out one desired packet according to the code before sending data
-    def Insertion(self, header, data):
+    # Send out one desired packet according to the code before sending the realdata
+    def Insertion(self, header):
         if self.changeCode == 'IP1':
             header[IP].ttl = self.index
         elif self.changeCode == 'IP2':
@@ -371,7 +372,7 @@ class erateSocket(object):
             header[IP].ihl = 16
         elif self.changeCode == 'IP4':
             # Set arbitrary length, 800 bytes longer
-            header[IP].len = len(data) + 800
+            header[IP].len = len(self.kdata) + 800
         elif self.changeCode == 'IP5':
             # Hard coded short length, only 40 bytes, if there is HTTP content, is definitely after 40 bytes
             header[IP].len = 40
@@ -400,17 +401,31 @@ class erateSocket(object):
         elif self.changeCode == 'UDP1':
             header[UDP].chksum = 88
         elif self.changeCode == 'UDP2':
-            header[UDP].len = len(data) + 800
+            header[UDP].len = len(self.kdata) + 800
         elif self.changeCode == 'UDP3':
             header[UDP].len = 8
+        elif self.changeCode == '':
+            return
         else:
             print '\n\t Wrong Change Specified'
             return
-        # We insert one packet if changes are made
-        pkt = header/self.kdata
-        # We send out this packet and won't care about the response
+
         print '\n\t InsertING'
-        sendp(pkt, verbose=False, iface = self.interface)
+        # We insert insertNum packet if changes are made
+        if self.insertSize == 0:
+            pkt = header/self.kdata
+            # We send out this one packet with pre-defined payload and won't care about the response
+            sendp(pkt, verbose=False, iface = self.interface)
+        # if insertSize is not 0, we then need to insert random string of length insertSize
+        else:
+            # We need this since we might need to change the sequence number
+            for i in xrange(self.insertNum):
+                rstring = ''.join(random.choice(string.ascii_letters + string.digits) for x in range(self.insertSize))
+                pkt = header/rstring
+                # We send out this packet and won't care about the response
+                sendp(pkt, verbose=False, iface = self.interface)
+                if header.haslayer(TCP):
+                    header[TCP].seq += self.insertSize
 
     # This function is used when sending UDP
     def sendto(self, data, dstAddress):
@@ -421,7 +436,7 @@ class erateSocket(object):
         l4header = self.l4.copy()
         header = self.l3/l4header
         if self.changeType == 'Insertion':
-            self.Insertion(header, data)
+            self.Insertion(header)
             self.udpsock.sendto(data, dstAddress)
         elif self.changeType == 'Evasion':
             self.udpsni = threading.Thread(target=self.udpsniffer)
@@ -445,14 +460,14 @@ class erateSocket(object):
     # This function sends data out
     # And will process the data received, return after all responses for this request is received
     def sendall(self, data):
-        # If insertion, insert the desired packet before sending this data out
+        # If insertion, insert the desired packets before sending this data out
         self.l4[TCP].flags = 'A'
         l3header = self.l3.copy()
         l4header = self.l4.copy()
         header = l3header/l4header
         if self.changeType == 'Insertion':
             if self.firstrequest == True:
-                self.Insertion(header,data)
+                self.Insertion(header)
                 self.firstrequest = False
             # time.sleep(10)
             # Let it be classified first, then send out the data through real socket
