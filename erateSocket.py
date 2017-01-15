@@ -27,14 +27,15 @@ class erateSocket(object):
         self.closed = False
         # This is the data that we would use when we insert packet, which contains the matching strings
         # can be changed
-        self.kdata = 'GET /503/60411503/agave50627591_24713015_H264_3200.tar/segment0.ts?br=3200&end=20160115171327&authToken=03649c75e658aabee2165 HTTP/1.1\r\n' \
-                     'X-rr: 129.10.9.28;Hulu-video;010.011.004.003.52624-008.254.207.190.00080\r\n' \
-                     'Host: httpls-1.hulu.com\r\n' \
-                     'X-Playback-Session-Id: E9A48165-8A60-4F72-83C6-9ACD06ED6EDC\r\n' \
-                     'Accept: */*\r\n' +\
-                     'User-Agent: AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
-                     'Accept-Language: zh-cn\r\n'\
-                     'Connection: Keep-Alive\r\n\r\n'
+        # self.kdata = 'GET /503/60411503/agave50627591_24713015_H264_3200.tar/segment0.ts?br=3200&end=20160115171327&authToken=03649c75e658aabee2165 HTTP/1.1\r\n' \
+        #              'X-rr: 129.10.9.28;Hulu-video;010.011.004.003.52624-008.254.207.190.00080\r\n' \
+        #              'Host: httpls-1.facebook.com\r\n' \
+        #              'X-Playback-Session-Id: E9A48165-8A60-4F72-83C6-9ACD06ED6EDC\r\n' \
+        #              'Accept: */*\r\n' +\
+        #              'User-Agent: AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
+        #              'Accept-Language: zh-cn\r\n'\
+        #              'Connection: Keep-Alive\r\n\r\n'
+        self.kdata = 'Break'
         # This is for writing pipe
         self.firstrequest = True
         self.w = None
@@ -57,6 +58,7 @@ class erateSocket(object):
         self.interface = interface
         self.srcIP = self.getIPbyiface()
         self.sport = srcAddress[1]
+        # print '\n\t ****', self.srcIP,self.sport
         # If port is not specified, let the OS pick one
         if srcAddress[1] == 0:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -69,7 +71,7 @@ class erateSocket(object):
             self.l4 = IP(src=self.srcIP,dst=self.dstIP)/TCP(sport=self.sport, dport=self.dport, flags=0, seq=self.initseq, ack=0)
             # If Insertion, we create a normal TCP socket on
             self.tcpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcpsock.bind((srcAddress[0],self.sport))
+            self.tcpsock.bind((self.srcIP,self.sport))
             self.tcpsock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.tcpsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # If insertion, we need a sniffer to get the right sequence/ack number when inserting
@@ -407,11 +409,8 @@ class erateSocket(object):
         # We insert one packet if changes are made
         pkt = header/self.kdata
         # We send out this packet and won't care about the response
-        if self.firstrequest == True:
-            print '\n\t InsertING'
-            # pkt.show2()
-            sendp(pkt, verbose=False, iface = self.interface)
-            self.firstrequest = False
+        print '\n\t InsertING'
+        sendp(pkt, verbose=False, iface = self.interface)
 
     # This function is used when sending UDP
     def sendto(self, data, dstAddress):
@@ -452,8 +451,10 @@ class erateSocket(object):
         l4header = self.l4.copy()
         header = l3header/l4header
         if self.changeType == 'Insertion':
-            self.Insertion(header,data)
-            # time.sleep(0.1)
+            if self.firstrequest == True:
+                self.Insertion(header,data)
+                self.firstrequest = False
+            # time.sleep(10)
             # Let it be classified first, then send out the data through real socket
             self.tcpsock.sendall(data)
         # Else we need to do raw communication (Evasion)
@@ -467,7 +468,7 @@ class erateSocket(object):
                     sendlist = self.makechangeE(header, data)
                 self.firstrequest = False
                 # print '\n\t SENDING DATA!'
-            response = srp(sendlist, verbose = False, multi = 1, timeout = self.timeout, iface = self.interface)
+            response = srp(sendlist, verbose = False, timeout = self.timeout, iface = self.interface)
             # After sending the modified packet, increase the sequence number accordingly
             self.l4[TCP].seq += len(data)
             # We then need to process the response of the last fragments that we sent out
