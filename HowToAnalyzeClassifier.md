@@ -29,6 +29,10 @@ Open the folders.txt, and change the content to /home/ubuntu/Test, thus the serv
 
 In ClassifierAnalysis.py, find the method 'prepareNewpickle', and add a line to deliver the newly created replay to the server each time after the modification, for example:
 
+PcapDirectory is where to put this pcap with blocked content, and also where to specify when running the analysis (see below):
+
+https://drive.google.com/file/d/0BzCfRAq9GYWxdmhjbmgyNXlaSkU/view?usp=sharing
+
 ```python
 subprocess.call('scp -o "StrictHostKeyChecking no" ' + PcapDirectory + '/*all.pickle user@server:/home/ubuntu/Test', stdout=subprocess.PIPE , shell=True)
 ```
