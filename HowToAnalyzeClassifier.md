@@ -141,3 +141,5 @@ By examining the original payload, we get the contents are : 'GET', the space be
 Notice there is a 1 min gap between each replay, which you can set in def Replay in ClassifierAnalysis.py. 
 
 This would make the whole process slower, but I notices sometimes there would be RST even for unblocked traffic if the blocked request is too frequent.
+
+The process is tedious as of now, I would improve on it later and please let me know if you have any suggestion, thank!
