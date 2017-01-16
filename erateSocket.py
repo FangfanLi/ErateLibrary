@@ -28,7 +28,7 @@ class erateSocket(object):
         # This is the data that we would use when we insert packet, which contains the matching strings
         # can be changed
         self.kdata = 'GET /dm/1$AK6OCP5ZLUJI1,36A60F17/vcid$39220608800/mpid$ATVPDKIKX0DER/type$FullVideo/videoMinBitrate$50000/videoquality$1080p/5059/0d51/a21f/47cd-a673-53908c821902/e0fceca1-f78d-4d7d-a948-60d45a856698_v9.m3u8 HTTP/1.1\r\n' \
-                     'Host: djmcau1gdkhrg.cloudfront.net\r\n' \
+                     'Host: www.facebook.com\r\n' \
                      'X-Playback-Session-Id: 1E67538B-8C90-4997-B238-48372837EE69\r\n' \
                      'Accept: */*\r\n'\
                      'AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
