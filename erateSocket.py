@@ -12,6 +12,18 @@ import logging
 logger = logging.getLogger(__name__)
 import random, threading, string, time, commands
 
+# This class is used for timing out the receiver for Evasion techniques
+class AckTimer(object):
+        def __init__(self, ack):
+            # This timer is timing out on this sequence
+            self.TimerAck = ack
+            self.startTime = time.time()
+
+        def starTime(self):
+            return self.startTime
+        def TimingOn(self):
+            return self.TimerAck
+
 class erateSocket(object):
     def __init__(self, protocol,  changeType = '', changeCode = '', index = 2, insertNum = 1, insertSize = 0, timeout = 0.5):
         self.protocol = protocol
@@ -27,25 +39,31 @@ class erateSocket(object):
         self.closed = False
         # This is the data that we would use when we insert packet, which contains the matching strings
         # can be changed
-        self.kdata = 'GET /dm/1$AK6OCP5ZLUJI1,36A60F17/vcid$39220608800/mpid$ATVPDKIKX0DER/type$FullVideo/videoMinBitrate$50000/videoquality$1080p/5059/0d51/a21f/47cd-a673-53908c821902/e0fceca1-f78d-4d7d-a948-60d45a856698_v9.m3u8 HTTP/1.1\r\n' \
-                     'Host: www.facebook.com\r\n' \
-                     'X-Playback-Session-Id: 1E67538B-8C90-4997-B238-48372837EE69\r\n' \
-                     'Accept: */*\r\n'\
-                     'AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
-                     'Accept-Language: zh-cn\r\n'\
-                     'Connection: Keep-Alive\r\n\r\n'
+        # self.kdata = 'GET /dm/1$AK6OCP5ZLUJI1,36A60F17/vcid$39220608800/mpid$ATVPDKIKX0DER/type$FullVideo/videoMinBitrate$50000/videoquality$1080p/5059/0d51/a21f/47cd-a673-53908c821902/e0fceca1-f78d-4d7d-a948-60d45a856698_v9.m3u8 HTTP/1.1\r\n' \
+        #              'Host: www.facebook.com\r\n' \
+        #              'X-Playback-Session-Id: 1E67538B-8C90-4997-B238-48372837EE69\r\n' \
+        #              'Accept: */*\r\n'\
+        #              'AppleCoreMedia/1.0.0.13E238 (iPhone; U; CPU OS 9_3_1 like Mac OS X; zh_cn)\r\n' \
+        #              'Accept-Language: zh-cn\r\n'\
+        #              'Connection: Keep-Alive\r\n\r\n'
+        self.kdata= 'GET /audio/b30ea993f6fe84be7c93587751ed26c96b258949?__token__=exp=1472840005~hmac=f9aa0e1f63a141bd984a4b2c3411bae77c82aaa94f25bc8dd6fe1fee7d3659be HTTP/1.1\r\n'\
+                    'Host: audio-ak.spotify.com.edgesuite.net\r\n'\
+                    'User-Agent: Spotify/5.7.0 iOS/9.3.4 (iPhone8,1)\r\n'\
+                    'Keep-Alive: 900\r\n'\
+                    'Connection: keep-alive\r\n'\
+                    'Accept-Encoding:\r\n'\
+                    'Range: bytes=131072-655359\r\n'\
+                    'Pragma: akamai-x-cache-on\r\n\r\n'
         self.insertSize = insertSize
         self.insertNum = insertNum
-        # self.kdata = 'Break'
         # This is for writing pipe
         self.firstrequest = True
         self.w = None
         self.initseq = random.randrange(0,2**32)
-        # Whether the first time receiving or sending a FIN packet
-        self.recFin = False
-        self.sendFin = False
-        self.recFinA = False
-        self.sendFinA = False
+        # This is used to time out the receiver thread
+        self.ackTimer = None
+        self.received = False
+        self.originalAck = 1
 
     def getIPbyiface(self):
         if 'linux' in sys.platform:
@@ -55,7 +73,7 @@ class erateSocket(object):
         output = commands.getoutput(getIPcommand)
         return output
 
-    def bind(self,srcAddress,interface):
+    def bind(self,srcAddress, interface):
         self.interface = interface
         self.srcIP = self.getIPbyiface()
         self.sport = srcAddress[1]
@@ -73,8 +91,8 @@ class erateSocket(object):
             # If Insertion, we create a normal TCP socket on
             self.tcpsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.tcpsock.bind((self.srcIP,self.sport))
-            self.tcpsock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self.tcpsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # self.tcpsock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            # self.tcpsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # If insertion, we need a sniffer to get the right sequence/ack number when inserting
             if self.changeType == 'Insertion':
                 self.sni = threading.Thread(target=self.sniffer)
@@ -100,26 +118,24 @@ class erateSocket(object):
         # Python socket
         elif self.changeType == 'Evasion':
             # We would just use the channel created by the previous three way handshake
-            print '\n\t Raw connection'
+            print '\n\t Raw connection',self.dstIP ,self.dport
             self.shake()
             # This is used for returning when select.selct() gets called on this erateSocket
             self.readP, self.writeP = os.pipe()
 
     def shake(self):
         # Prepare a ethernet layer for sending data out with sendp
-        self.l3 = Ether()
         self.l4[TCP].flags = 'S'
-        sendp(self.l3/self.l4, verbose=False, iface = self.interface)
-        build_lfilter = lambda (r): TCP in r and r[TCP].dport == self.sport
-        # Response is the SYN/ACK packet
-        pkt = sniff(lfilter=build_lfilter, count=1, iface = self.interface, timeout=self.timeout)
-        self.l4[TCP].seq = pkt[0][TCP].ack
-        self.l4[TCP].ack = pkt[0][TCP].seq + 1
-        self.l4[TCP].dport = pkt[0][TCP].sport
-        self.l4[IP].dst = pkt[0][IP].src
-        self.l4[IP].src = pkt[0][IP].dst
-        self.srcIP = pkt[0][IP].dst
-        self.dstIP = pkt[0][IP].src
+        SYNACK=sr1(self.l4, verbose=0, timeout=2)
+        self.l4[TCP].seq = SYNACK[TCP].ack
+        self.l4[TCP].ack = SYNACK[TCP].seq + 1
+        self.l4[TCP].dport = SYNACK[TCP].sport
+        self.l4[IP].dst = SYNACK[IP].src
+        self.l4[IP].src = SYNACK[IP].dst
+        self.srcIP = SYNACK[IP].dst
+        self.dstIP = SYNACK[IP].src
+        self.originalAck = self.l4[TCP].ack
+
         print 'Now the Handshake is done'
         return
 
@@ -138,7 +154,97 @@ class erateSocket(object):
         self.l4[IP].src = pkt[0][IP].dst
         self.srcIP = pkt[0][IP].dst
         self.dstIP = pkt[0][IP].src
-        self.l3 = Ether()
+        return
+
+    def tcp_callback(self, pkt):
+        # print '\n\t TCP CallBACK: '
+        if pkt[TCP].flags & 0x10 == 0x10: #ACK is set
+                # This is if there is real payload in pkt[TCP].payload
+                # And this is the sequence that the socket is currently waiting for
+                # We add the received payload into the receiver's buffer
+                if (pkt[IP].len > 4*pkt[IP].ihl + 4*pkt[TCP].dataofs) and (pkt[TCP].seq == self.l4[TCP].ack):
+                    # print '\n\t More DATA coming', len(str(pkt[TCP].payload))
+                    # Get the content length
+                    contentLen = pkt[IP].len - 4*pkt[IP].ihl - 4*pkt[TCP].dataofs
+                    self.buf += str(pkt[TCP].payload)[:contentLen]
+                    self.l4[TCP].ack += contentLen
+                    # print '\n\t ACK the new data'
+                    self.l4[TCP].flags = 'A'
+                    send(self.l4, verbose = False)
+        # If the sequence is not what the socket is currently waiting for
+        # We would then Ack the previous one that we reiceived, and the data would be re-transmitted from the server
+        elif pkt[TCP].seq != self.l4[TCP].ack:
+            # print '\n\t Wrong SEQ ', pkt[TCP].seq - self.l4[TCP].ack
+            self.l4[TCP].flags = 'A'
+            send(self.l4, verbose = False)
+
+    def udp_callback(self, pkt):
+        print '\n\t UDP CallBACK: '
+        pkt.show()
+
+    # A receiver thread
+    # It would keep sniffing on the port pair and would call the call_back once it received new packet
+    def Recvsniffer(self):
+        # This is indicating when the sniffer should stop
+        # The sniffer would stop if pkt has certain property
+        # There are multiple cases that we can stop the receiver
+        # 1. We get a RST
+        # 2. We have been seen empty responses at the same sequence number for a long time (self.timeout)
+        #    Which indicates that we probably have received everything for the previous request
+        # 3. We are seeing a FIN request with the same sequence number that we are waiting for
+        #    Which indicates we have received everything and the server would like to close the connection
+        def stopfilter(pkt):
+            # If we received a RST from the other end
+            if pkt[TCP].flags == 'R' :
+                print '\n\t Need to stop! Because RST received'
+                return True
+            elif (pkt[IP].len == 4*pkt[IP].ihl + 4*pkt[TCP].dataofs) and (pkt[TCP].seq == self.l4[TCP].ack) and (pkt[TCP].flags & 0x1 != 1):
+                print '\n\t Empty ACK Received'
+                pkt.show2()
+                # We hasn't seen empty response for this acknowledgement yet, start timing out
+                if self.ackTimer == None or self.ackTimer.TimingOn() != self.l4[TCP].ack:
+                    print '\n\t Start Timing'
+                    self.ackTimer = AckTimer(self.l4[TCP].ack)
+                    return False
+                # We are timing on this acknowledgment, but hasn't time out yet
+                elif (time.time() - self.ackTimer.starTime()) < self.timeout:
+                    return False
+                # We need to time out
+                else:
+                    return True
+            # If the FIN flag is set, and we finished receiving all data
+            # then we need to finish the three way close
+            elif pkt[TCP].flags & 0x1 == 1 and (pkt[TCP].seq == self.l4[TCP].ack):
+                # First read out the content if they are within this FIN
+                if (pkt[IP].len > 4*pkt[IP].ihl + 4*pkt[TCP].dataofs):
+                    self.buf += str(pkt[TCP].payload)
+                    self.l4[TCP].ack += len(str(pkt[TCP].payload))
+                self.l4[TCP].flags = 'FA'
+                # self.l4[TCP].seq += 1
+                self.l4[TCP].ack += 1
+                # Send the FIN/ACK
+                print '\n\t Received FIN, sending out FIN/ACK'
+                send(self.l4, verbose = False)
+                # Mark this socket as closed
+                return True
+            else:
+                return False
+
+        print '\n\t In RCV sniffer'
+        if self.protocol == 'tcp':
+            build_lfilter = lambda (r): TCP in r and r[TCP].dport == self.sport
+            # If we don't get anything during timeout, we just return
+            sniff(iface=self.interface, lfilter=build_lfilter, prn=self.tcp_callback,
+                  stop_filter = stopfilter, store=1, timeout=0.3)
+        else:
+            build_lfilter = lambda (r): UDP in r and r[UDP].dport == self.sport
+            sniff(iface=self.interface, prn=self.udp_callback, lfilter=build_lfilter, store=0)
+        print '\n\t The Receiver stopped'
+        # If there are data being received, we then write into the pipe
+        # Thus select.select can return
+        if self.buf != [] and self.w == None:
+            self.w = os.fdopen(self.writeP,'w')
+            self.w.write('Select Can Return')
         return
 
     # This is a thread opened for receiving UDP results
@@ -192,8 +298,9 @@ class erateSocket(object):
                 size = int((len(pkt[UDP].payload) + 20)/self.index)
             frags = fragment(pkt,size)
             # Shuffle the fragments and return the shuffled
-            random.shuffle(frags)
+            # random.shuffle(frags)
             pkts = frags
+            pkts.reverse()
 
         elif self.changeCode == 'IP3':
             pkt = header/data
@@ -271,7 +378,9 @@ class erateSocket(object):
             p[TCP].seq += size
             pkts.append(p)
             # Shuffle the segments
-            random.shuffle(pkts)
+            # random.shuffle(pkts)
+            pkts.reverse()
+
 
         elif self.changeCode == 'TCP3':
             remain = data
@@ -378,7 +487,7 @@ class erateSocket(object):
             header[IP].len = 40
         elif self.changeCode == 'IP6':
             # Change it to UDP
-            header = self.l3.copy()/IP(src=self.srcIP,dst=self.dstIP)/UDP(sport=self.sport,dport=self.dport)
+            header = IP(src=self.srcIP,dst=self.dstIP)/UDP(sport=self.sport,dport=self.dport)
         elif self.changeCode == 'IP7':
             header[IP].chksum = 88
         elif self.changeCode == 'IP8':
@@ -415,7 +524,7 @@ class erateSocket(object):
         if self.insertSize == 0:
             pkt = header/self.kdata
             # We send out this one packet with pre-defined payload and won't care about the response
-            sendp(pkt, verbose=False, iface = self.interface)
+            send(pkt, verbose=False)
         # if insertSize is not 0, we then need to insert random string of length insertSize
         else:
             # We need this since we might need to change the sequence number
@@ -423,7 +532,7 @@ class erateSocket(object):
                 rstring = ''.join(random.choice(string.ascii_letters + string.digits) for x in range(self.insertSize))
                 pkt = header/rstring
                 # We send out this packet and won't care about the response
-                sendp(pkt, verbose=False, iface = self.interface)
+                send(pkt, verbose=False)
                 if header.haslayer(TCP):
                     header[TCP].seq += self.insertSize
 
@@ -431,10 +540,8 @@ class erateSocket(object):
     def sendto(self, data, dstAddress):
         self.l4[IP].dst = dstAddress[0]
         self.l4[UDP].dport = dstAddress[1]
-        # self.l4.show2()
-        self.l3 = Ether()
         l4header = self.l4.copy()
-        header = self.l3/l4header
+        header = l4header
         if self.changeType == 'Insertion':
             self.Insertion(header)
             self.udpsock.sendto(data, dstAddress)
@@ -453,7 +560,7 @@ class erateSocket(object):
             if sendlist == []:
                 return
             for pkt in sendlist:
-                sendp(pkt, verbose = False, iface = self.interface)
+                send(pkt, verbose = False)
             return
 
 
@@ -462,9 +569,8 @@ class erateSocket(object):
     def sendall(self, data):
         # If insertion, insert the desired packets before sending this data out
         self.l4[TCP].flags = 'A'
-        l3header = self.l3.copy()
         l4header = self.l4.copy()
-        header = l3header/l4header
+        header = l4header
         if self.changeType == 'Insertion':
             if self.firstrequest == True:
                 self.Insertion(header)
@@ -475,82 +581,36 @@ class erateSocket(object):
         # Else we need to do raw communication (Evasion)
         elif self.changeType == 'Evasion':
             sendlist = [header/data]
+            self.Rcvsni = threading.Thread(target=self.Recvsniffer)
+            self.Rcvsni.start()
             # print '\n\tBefore Changing'
             # p.show2()
             # We only change the first packet so far
             if self.firstrequest == True:
                 if self.changeCode != '':
                     sendlist = self.makechangeE(header, data)
-                self.firstrequest = False
-                # print '\n\t SENDING DATA!'
-            response = srp(sendlist, verbose = False, timeout = self.timeout, iface = self.interface)
-            # After sending the modified packet, increase the sequence number accordingly
+                    self.firstrequest = False
+            send(sendlist, verbose = False)
             self.l4[TCP].seq += len(data)
-            # We then need to process the response of the last fragments that we sent out
-            return self.ProcessResponses(response[0])
-
-    # Process the responses received
-    # Four cases:
-    # 1. We get new data, then the ACK number progresses
-    # 2. We get FIN with no new data, then complete the three way FIN, return 0 (We definitely received everything)
-    # 3. We get nothing, then timeout and return 1 (We assume received everything)
-    # 4. We get RST, then we just return 2
-    def ProcessResponses(self, responseList):
-        # print '\n\t PROCESSING RESPONSE'
-        currentAck = self.l4[TCP].ack
-        newFin = False
-        for singleResp in responseList:
-            # pkt is the response from other side
-            # singleResp[0] is the request
-            pkt = singleResp[1]
-            if not pkt.haslayer(TCP):
-                break
-            if pkt[TCP].flags & 0x10 == 0x10: #ACK is set
-                # This is if there is real payload in pkt[TCP].payload
-                # And this is the sequence that the socket is waiting for
-                if (pkt[IP].len > 4*pkt[IP].ihl + 4*pkt[TCP].dataofs) and (pkt[TCP].seq == currentAck):
-                    currentAck += len(pkt[TCP].payload)
-                    self.buf += str(pkt[TCP].payload)
-            elif pkt[TCP].flags & 4 != 0:  # RST
-                self.closed = True
-                return 2
-            if pkt[TCP].flags & 0x1 == 1: # if FIN is set
-                newFin = True
-
-        # If we get more data in this response, then try whether there are more data for this request
-        if currentAck > self.l4[TCP].ack:
-            # Trying get more data
-            self.l4[TCP].ack = currentAck
-            response = srp(self.l3/self.l4, verbose = False,  multi = 1, timeout = self.timeout, iface = self.interface)
-            return self.ProcessResponses(response[0])
-        # If we dont get more data, then if we have received FIN, finish three way FIN
-        elif newFin == True:
-            # ACK + 1 to FIN/ACK the FIN
-            self.l4[TCP].ack = responseList[-1][1][TCP].seq + 1
-            self.l4[TCP].flags = 'FA'
-            # Successfully closed
-            # Set self.w thus select.select can return now if not set before
-            if self.w == None:
-                self.w = os.fdopen(self.writeP,'w')
-            self.w.write('Select Can Return')
-            sendp(self.l3/self.l4, verbose = False, iface = self.interface)
-        # Else means we have received all response for this request and we do not want to close the connection yet
-        else:
-            if self.w == None:
-                self.w = os.fdopen(self.writeP,'w')
-            self.w.write('Select Can Return')
-            return 1
+        return
 
     # This function is used to return data that received
     # Only return data if there is data beyond TCP layer
+    # For Insertion, just return the one received from the tcp socket
+    # For Evasion, we need to first join the receiving thread, and then return the data in the buffer
     def recv(self, Bufsize):
         # For insertions, just return the right sSocket
         if self.changeType == 'Insertion':
             return self.tcpsock.recv(Bufsize)
+        # For Evasion techniques
         else:
+            # We need to first join the receiver thread
+            self.Rcvsni.join()
             # Return the buf that raw socket received
             returnv = self.buf[ : Bufsize]
             self.buf = self.buf[Bufsize: ]
+            if returnv == '':
+                print '\n\t Empty Acking',self.l4[TCP].ack - self.originalAck
             return returnv
 
     # This function is used to return data that received
@@ -581,12 +641,8 @@ class erateSocket(object):
     # TODO: If there if more data after we sent FIN, grace FIN
     def CompleteFin(self):
         self.l4[TCP].flags = 'FA'
-        response = srp(self.l3/self.l4, verbose = False, multi = 1, timeout = self.timeout,iface = self.interface)
-        # if response[0][-1][1][TCP].ack != self.l4[TCP].seq + 1:
-        #     self.l4[TCP].seq += 1
-        #     self.l4[TCP].ack += 1
-        #     # ACK the FIN/ACK
-        #     send(self.l4, verbose= False)
+        response = sr1(self.l4, verbose = False, timeout = self.timeout)
+        print '\n\t I am seeing this after sending FIN',response[0][1]
         self.l4[TCP].seq += 1
         self.l4[TCP].ack += 1
         # ACK the FIN/ACK
