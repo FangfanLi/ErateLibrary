@@ -7,7 +7,7 @@ from collections import deque
 
 Replaycounter = 0
 
-def GetMeta(PcapDirectory, Prot, numPackets, client_ip):
+def GetMeta(PcapDirectory, numPackets, client_ip):
 
     Meta = {'Client':[], 'Server':[]}
     changeMeta = {'Client':[], 'Server':[]}
@@ -25,7 +25,13 @@ def GetMeta(PcapDirectory, Prot, numPackets, client_ip):
         for cPacket in clientQ:
             Meta['Client'].append(len(cPacket.payload.decode('hex')))
 
-    # There should only be a single csp
+    # There should only be one protocol that is in the pcap
+    # Thus the one with an csp in it
+    Prot = 'tcp'
+    for P in serverQ.keys():
+        if P != {}:
+            Prot = P
+    # There should only be a single csp as well
     csp = serverQ[Prot].keys()[0]
 
     if len(serverQ) > 0:
@@ -60,7 +66,7 @@ def GetMeta(PcapDirectory, Prot, numPackets, client_ip):
     changeMeta['Client'] = Meta['Client'][:clientc]
     changeMeta['Server'] = Meta['Server'][:serverc]
 
-    return changeMeta,csp
+    return changeMeta,csp,Prot
 
 # This function would run replay client against the replay server for one time
 def runReplay(PcapDirectory, csp):
@@ -335,15 +341,8 @@ def main(args):
 
     # All the configurations used
     configs = Configs()
+    # The characterization server's default port: 18888
     configs.set('charServer_port'  , 18888)
-    configs.set('sidechannel_port' , 55555)
-    configs.set('resultsFolder'    , 'Results')
-    configs.set('jitterFolder'     , 'jitterResults')
-    configs.set('tcpdumpFolder'    , 'tcpdumpsResults')
-    configs.set('extraString'      , 'extraString')
-    configs.set('maxIdleTime'      , 30)
-    configs.set('endOfTest'        , True)
-    configs.set('testID'           , 'SINGLE')   #options: VPN, NOVPN, RANDOM, SINGLE -- we need this for the vpn_no_vpn wrapper
 
     if args == []:
         configs.read_args(sys.argv)
@@ -363,7 +362,6 @@ def main(args):
 
     PcapDirectory = configs.get('pcap_folder')
     numPackets = configs.get('num_packets')
-    Protocol = configs.get('prot')
     client_ip_file = os.path.abspath(PcapDirectory + '/client_ip.txt')
     CharServerIP = configs.get('serverInstanceIP')
     CharServerPort = configs.get('charServer_port')
@@ -371,7 +369,7 @@ def main(args):
     with open(client_ip_file,'r') as c:
         client_ip = c.readline().split('\n')[0]
 
-    changeMeta,csp = GetMeta(PcapDirectory, Protocol, numPackets, client_ip)
+    changeMeta, csp, Protocol= GetMeta(PcapDirectory, numPackets, client_ip)
     print 'META DATA for The packets that we need to change', changeMeta
     # This is to record how many replays we ran for this analysis
     global Replaycounter

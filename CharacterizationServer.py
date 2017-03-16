@@ -5,15 +5,20 @@ def main(args):
     # Create a TCP/IP socket
     try:
         PcapDirectory = args[1]
-        Prot = args[2]
     except:
-        print 'Please provide the parameters as specified: [PcapDirectory] [Protocol]\n'
+        print 'Please provide the parameters as specified: [PcapDirectory]\n'
         sys.exit()
     # Get the csp and replayName (fixed as 'test' so far) for each replay
 
     classifier_parser.beingCalled(PcapDirectory, '',0,'','',[])
     serverQ, tmpLUT, tmpgetLUT, udpServers, tcpServerPorts, replayName = \
         pickle.load(open(PcapDirectory + '/test.pcap_server_all.pickle','r'))
+    # There should only be one protocol that is in the pcap
+    # Thus the one with an csp in it
+    Prot = 'tcp'
+    for P in serverQ.keys():
+        if P != {}:
+            Prot = P
     # There should be only one prot in serverQ after cleaning in the first place
     csp = serverQ[Prot].keys()[0]
 
