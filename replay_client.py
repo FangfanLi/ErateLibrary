@@ -139,14 +139,12 @@ class tcpClient(object):
         '''
         Create and connect TCP socket
         '''
-        # self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # self.sock.bind((Configs().get('publicIP'), 0))
-        # self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        # self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # self.sock.connect(self.dst_instance)
-        self.sock = erateSocket.erateSocket(protocol = 'tcp' ,changeType = 'Insertion', changeCode = '', index = 3, insertNum = 1, insertSize = 0, timeout = 3)
-        self.sock.bind((Configs().get('publicIP'), 0),Configs().get('iface'))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind((Configs().get('publicIP'), 0))
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.connect(self.dst_instance)
+        self.sock.settimeout(Configs().get('maxIdleTime'))
         
     def single_tcp_request_response(self, tcp, send_event, tolerance=100):
         '''
@@ -241,10 +239,10 @@ class udpClient(object):
         '''
         Creates UDP socket and force it to bind to a port by sending a dummy packet
         '''
-        # self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # self.sock.bind((Configs().get('publicIP'), 0))
-        self.sock = erateSocket.erateSocket(protocol = 'udp' ,changeType = 'Insertion', changeCode = '', index = 3, timeout = 0.5)
-        self.sock.bind((Configs().get('publicIP'), 0),Configs().get('iface'))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind((Configs().get('publicIP'), 0))
+        # self.sock = erateSocket.erateSocket(protocol = 'udp' ,changeType = 'Insertion', changeCode = 'UDP3', index = 3, timeout = 0.5)
+        # self.sock.bind((Configs().get('publicIP'), 0),Configs().get('iface'))
         # self.port = str(self.sock.getsockname()[1]).zfill(5)
         
     def send_udp_packet(self, udp, dstAddress):
@@ -434,6 +432,8 @@ class SideChannel(object):
         
         if exitCode == 1:
             print '\n\n*****Too much idle time! Killing the replay {}*****\n\n'.format(inactiveTime)
+            # with open('Result.txt','w+') as t:
+            #     t.writelines('Blocked\n')
             self.send_object('timeout')
         elif exitCode == 2:
             print '\n\n*****IP flipping detected (sideChannel: {}, flipped:{}, destination: {})*****\n\n'.format(self.publicIP, flippedIP, dstInstance)
@@ -442,7 +442,7 @@ class SideChannel(object):
         if Configs().get('doTCPDUMP'):
             replayObj.dump.stop()
             
-        if exitCode != 0:
+        if exitCode != 0 and exitCode != 2:
             os._exit(exitCode)
       
     def sendIperf(self):
@@ -778,6 +778,14 @@ def run():
     sideChannel.get_result('result.jpg', result=configs.get('result'))
     
     PRINT_ACTION('Fin', 0)
+    # Check whether rate-limited:
+    # if int(duration) > time:
+    #     with open('Result.txt','w+') as t:
+    #         t.writelines('Limited\n')
+    # else:
+    #     with open('Result.txt','w+') as t:
+    #         t.writelines('NotLimited\n')
+
     PRINT_ACTION('The process took {} seconds'.format(duration), 1, action=False)
     
     return True
@@ -800,7 +808,7 @@ def initialSetup(args=[]):
     configs.set('byExternal'       , False)
     configs.set('skipTCP'          , False)
     configs.set('addHeader'        , False)
-    configs.set('maxIdleTime'      , 1000)
+    configs.set('maxIdleTime'      , 30)
     configs.set('endOfTest'        , True)
     configs.set('testID'           , 'SINGLE')   #options: VPN, NOVPN, RANDOM, SINGLE -- we need this for the vpn_no_vpn wrapper
     if args == []:
@@ -814,7 +822,7 @@ def initialSetup(args=[]):
         configs.get('serverInstanceIP')
     except KeyError:
         configs.check_for(['serverInstance'])
-        configs.check_for(['iface'])
+        # configs.check_for(['iface'])
         configs.set('serverInstanceIP', Instance().getIP(configs.get('serverInstance')))
     
     if configs.get('doTCPDUMP'):

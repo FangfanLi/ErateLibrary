@@ -919,6 +919,59 @@ def run(directory, MSide = '', MPacketNum = 0, MAction = '', MProtocol = '', MLi
         '''
         ###############################
         '''
+        # ******************************************************
+        # THE FOLLOWING CODE IS USED FOR MAKING CHANGES ON THE CLIENT QS
+        # ******************************************************
+
+        # modifications on the Client side is independent of the protocol
+        # And need to be done before the hash is used by the server side
+        if MSide == 'Client':
+            print '\n\t Making Client changes ', MAction,'On packet',MPacketNum
+            # print '\n\t Client packet', MPacketNum, ' Before ::',clientQ[MPacketNum-1].payload.decode('hex')
+
+            if 'Random' in MAction:
+                TMPclientQ[MPacketNum-1].payload = XorPayload(TMPclientQ[MPacketNum-1].payload)
+
+                # print '\n\t After randomization ::',clientQ[MPacketNum-1].payload.decode('hex')
+                # Store the Qs with randomized packet into the /random dir, which will be loaded in XorReplace
+                print '\n\t Dumping the random payload into /random'
+                XorDump(configs, TMPclientQ, udpClientPorts, tcpCSPs, replay_name, serverQ, LUT, getLUT, udpServers, tcpServerPorts)
+
+            elif 'Move' in MAction:
+                TMPclientQ[MPacketNum-1].payload = Move(TMPclientQ[MPacketNum-1].payload, MList[0][0], MList[0][1])
+                # print '\n\t After moving ::',clientQ[MPacketNum-1].payload.decode('hex')
+
+            elif 'Delete' in MAction:
+                # print '\n\t Client Q Before deleting ::',clientQ
+                TMPclientQ.pop(MPacketNum-1)
+                # print '\n\t Client Q after deleting ::',clientQ
+
+            elif 'Prepend' in MAction:
+                preNum = MList[0]
+                preLen = MList[1]
+                # print '\n\t Client Q Before prepending ::',clientQ
+                rstring = ''.join(random.choice(string.ascii_letters + string.digits) for x in range(preLen))
+                for i in xrange(preNum):
+                    preQ = RequestSet(rstring.encode('hex'), TMPclientQ[0].c_s_pair, None, TMPclientQ[0].timestamp)
+                    TMPclientQ.insert(0, preQ)
+                print '\n\t Client Q after prepending ::',TMPclientQ
+
+            elif 'ReplaceW' in MAction:
+                regions = MList
+                TMPclientQ[MPacketNum-1].payload = MultiReplace(TMPclientQ[MPacketNum-1].payload, regions, '')
+                print '\n\t After ReplaceW ::',TMPclientQ[MPacketNum-1].payload.decode('hex')
+
+            elif 'ReplaceR' in MAction:
+
+                regions = MList
+
+                rpayload = XorLoad(configs, MSide, MPacketNum, 'client', 'client')
+                rpayload = rpayload.decode('hex')
+
+                TMPclientQ[MPacketNum-1].payload = MultiReplace(TMPclientQ[MPacketNum-1].payload, regions, rpayload)
+
+            else:
+                print '\n\t MAction is ',MAction,'No such action specified yet. No ACTION taken'
 
         toHash  = TMPclientQ[0].payload.decode('hex')[:sample_size]
         theHash = hash(toHash)
@@ -968,163 +1021,124 @@ def run(directory, MSide = '', MPacketNum = 0, MAction = '', MProtocol = '', MLi
         udpServers[serverIP] = list(udpServers[serverIP])
 
     # ******************************************************
-    # THE FOLLOWING CODE IS USED FOR MAKING CHANGES ON THE QS
+    # THE FOLLOWING CODE IS USED FOR MAKING CHANGES ON THE SERVER QS
     # ******************************************************
 
-    # Make changes on packet level
-    if MSide != '':
-        # modifications on the Client side is independent of the protocol
-        if MSide == 'Client':
-            print '\n\t Making Client changes ', MAction,'On packet',MPacketNum
-            # print '\n\t Client packet', MPacketNum, ' Before ::',clientQ[MPacketNum-1].payload.decode('hex')
+    # The procotol needs to be specified when making changes on the server side
+
+    if MSide == 'Server':
+
+        print '\n\t Making changes on Server', MProtocol, MAction,'On packet',MPacketNum
+
+        # UDP server changes
+        if MProtocol == 'udp':
+            # There should only be one csp cause we have to clean up the original pcap before processing
+            csp = serverQ[MProtocol].keys()[0]
+            # print '\n\t Server packet', MPacketNum, ' Before ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
 
             if 'Random' in MAction:
-
-                clientQ[MPacketNum-1].payload = XorPayload(clientQ[MPacketNum-1].payload)
-
-                # print '\n\t After randomization ::',clientQ[MPacketNum-1].payload.decode('hex')
-            #     Store the Qs with randomized packet into the /random dir, which will be loaded in XorReplace
-                print '\n\t Dumping the random payload into /random'
+                serverQ[MProtocol][csp][MPacketNum-1].payload = \
+                    Randomize(serverQ[MProtocol][csp][MPacketNum-1].payload)
+                # print '\n\t After randomization ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
+                # print '\n\t Dumping the random payload into /random'
                 XorDump(configs, clientQ, udpClientPorts, tcpCSPs, replay_name, serverQ, LUT, getLUT, udpServers, tcpServerPorts)
 
 
-            elif 'Truncate' in MAction:
-                Tbyte = MList[0]
-                clientQ[MPacketNum-1].payload = Truncate(clientQ[MPacketNum-1].payload, Tbyte)
-                # print '\n\t After truncating ::',clientQ[MPacketNum-1].payload.decode('hex')
-
             elif 'Move' in MAction:
-                clientQ[MPacketNum-1].payload = Move(clientQ[MPacketNum-1].payload, MList[0][0], MList[0][1])
-                # print '\n\t After moving ::',clientQ[MPacketNum-1].payload.decode('hex')
+                serverQ[MProtocol][csp][MPacketNum-1].payload = \
+                    Move(serverQ[MProtocol][csp][MPacketNum-1].payload, MList[0][0], MList[0][1])
+                # print '\n\t After moving ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
 
             elif 'Delete' in MAction:
-                # print '\n\t Client Q Before deleting ::',clientQ
-                clientQ.pop(MPacketNum-1)
-                # print '\n\t Client Q after deleting ::',clientQ
+                # print '\n\t Server Q Before deleting ::',serverQ[MProtocol][csp]
+                serverQ[MProtocol][csp].pop(MPacketNum-1)
+                # print '\n\t Server Q after deleting ::',serverQ[MProtocol][csp]
 
             elif 'ReplaceW' in MAction:
                 regions = MList
-                clientQ[MPacketNum-1].payload = MultiReplace(clientQ[MPacketNum-1].payload, regions, '')
-                print '\n\t After ReplaceW ::',clientQ[MPacketNum-1].payload.decode('hex')
+                serverQ[MProtocol][csp][MPacketNum-1].payload = \
+                    MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].payload, regions, '')
+                # print '\n\t After ReplaceW ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
 
             elif 'ReplaceR' in MAction:
-
                 regions = MList
-
-                rpayload = XorLoad(configs, MSide, MPacketNum, 'client', 'client')
+                rpayload = XorLoad(configs, MSide, MPacketNum, 'udp', csp)
                 rpayload = rpayload.decode('hex')
-
-                clientQ[MPacketNum-1].payload = MultiReplace(clientQ[MPacketNum-1].payload, regions, rpayload)
-
+                serverQ[MProtocol][csp][MPacketNum-1].payload = \
+                    MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].payload,regions, rpayload)
 
             else:
 
                 print '\n\t MAction is ',MAction,'No such action specified yet. No ACTION taken'
 
+        #TCP server changes
+        else:
+            csp = serverQ[MProtocol].keys()[0]
+            # For TCP, count the number of serverQ['tcp'][csp], make changes on serverQ['tcp'][csp][PacketNum].response_list[0].payload
+            # print '\n\t Server packet', MPacketNum, ' Before ::',serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload.decode('hex')
 
-# The procotol needs to be specified when making changes on the server side
+            if 'Random' in MAction:
+                serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
+                    Randomize(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload)
+                # print '\n\t After randomization ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
+                # print '\n\t Dumping the random payload into /random'
+                XorDump(configs, clientQ, udpClientPorts, tcpCSPs, replay_name, serverQ, LUT, getLUT, udpServers, tcpServerPorts)
 
-        elif MSide == 'Server':
+            elif 'Move' in MAction:
+                serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
+                    Move(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload, MList[0][0], MList[0][1])
+                # print '\n\t After moving ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
 
-            print '\n\t Making changes on Server', MProtocol, MAction,'On packet',MPacketNum
+            elif 'Delete' in MAction:
+                # print '\n\t Server Q Before deleting ::',serverQ[MProtocol][csp]
+                serverQ[MProtocol][csp].pop(MPacketNum-1)
+                # print '\n\t Server Q after deleting ::',serverQ[MProtocol][csp]
 
-            # UDP server changes
-            if MProtocol == 'udp':
-                # There should only be one csp cause we have to clean up the original pcap before processing
-                csp = serverQ[MProtocol].keys()[0]
-                # print '\n\t Server packet', MPacketNum, ' Before ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
+            elif 'ReplaceW' in MAction:
+                regions = MList
+                serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
+                    MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload, regions, '')
+                # print '\n\t After ReplaceW ::',serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload.decode('hex')
 
-                if 'Random' in MAction:
-                    serverQ[MProtocol][csp][MPacketNum-1].payload = \
-                        Randomize(serverQ[MProtocol][csp][MPacketNum-1].payload)
-                    # print '\n\t After randomization ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
-                    print '\n\t Dumping the random payload into /random'
-                    XorDump(configs, clientQ, udpClientPorts, tcpCSPs, replay_name, serverQ, LUT, getLUT, udpServers, tcpServerPorts)
+            elif 'ReplaceR' in MAction:
+                regions = MList
+                rpayload = XorLoad(configs, MSide, MPacketNum, 'UDP', csp)
+                rpayload = rpayload.decode('hex')
+                serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
+                    MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload, regions, rpayload)
 
-                elif 'Truncate' in MAction:
-                    Tbyte = MList[0]
-                    serverQ[MProtocol][csp][MPacketNum-1].payload = \
-                        Truncate(serverQ[MProtocol][csp][MPacketNum-1].payload, Tbyte)
-                    # print '\n\t After truncating ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
-
-                elif 'Move' in MAction:
-                    serverQ[MProtocol][csp][MPacketNum-1].payload = \
-                        Move(serverQ[MProtocol][csp][MPacketNum-1].payload, MList[0][0], MList[0][1])
-                    # print '\n\t After moving ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
-
-                elif 'Delete' in MAction:
-                    # print '\n\t Server Q Before deleting ::',serverQ[MProtocol][csp]
-                    serverQ[MProtocol][csp].pop(MPacketNum-1)
-                    # print '\n\t Server Q after deleting ::',serverQ[MProtocol][csp]
-
-                elif 'ReplaceW' in MAction:
-                    regions = MList
-                    serverQ[MProtocol][csp][MPacketNum-1].payload = \
-                        MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].payload, regions, '')
-                    print '\n\t After ReplaceW ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
-
-                elif 'ReplaceR' in MAction:
-                    regions = MList
-                    rpayload = XorLoad(configs, MSide, MPacketNum, 'udp', csp)
-                    rpayload = rpayload.decode('hex')
-                    serverQ[MProtocol][csp][MPacketNum-1].payload = \
-                        MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].payload,regions, rpayload)
-
-                else:
-
-                    print '\n\t MAction is ',MAction,'No such action specified yet. No ACTION taken'
-
-            #TCP server changes
             else:
-                csp = serverQ[MProtocol].keys()[0]
-                # For TCP, count the number of serverQ['tcp'][csp], make changes on serverQ['tcp'][csp][PacketNum].response_list[0].payload
-                # print '\n\t Server packet', MPacketNum, ' Before ::',serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload.decode('hex')
-
-                if 'Random' in MAction:
-                    serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
-                        Randomize(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload)
-                    # print '\n\t After randomization ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
-                    print '\n\t Dumping the random payload into /random'
-                    XorDump(configs, clientQ, udpClientPorts, tcpCSPs, replay_name, serverQ, LUT, getLUT, udpServers, tcpServerPorts)
-
-                elif 'Truncate' in MAction:
-                    Tbyte = MList[0]
-                    serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
-                        Truncate(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload, Tbyte)
-                    # print '\n\t After truncating ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
-
-                elif 'Move' in MAction:
-                    serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
-                        Move(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload, MList[0][0], MList[0][1])
-                    # print '\n\t After moving ::',serverQ[MProtocol][csp][MPacketNum-1].payload.decode('hex')
-
-                elif 'Delete' in MAction:
-                    # print '\n\t Server Q Before deleting ::',serverQ[MProtocol][csp]
-                    serverQ[MProtocol][csp].pop(MPacketNum-1)
-                    # print '\n\t Server Q after deleting ::',serverQ[MProtocol][csp]
-
-                elif 'ReplaceW' in MAction:
-                    regions = MList
-                    serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
-                        MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload, regions, '')
-                    print '\n\t After ReplaceW ::',serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload.decode('hex')
-
-                elif 'ReplaceR' in MAction:
-                    regions = MList
-                    rpayload = XorLoad(configs, MSide, MPacketNum, 'udp', csp)
-                    rpayload = rpayload.decode('hex')
-                    serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload = \
-                        MultiReplace(serverQ[MProtocol][csp][MPacketNum-1].response_list[0].payload, regions, rpayload)
-
-                else:
-                    print '\n\t MAction is ',MAction,'No such action specified yet. No ACTION taken'
+                print '\n\t MAction is ',MAction,'No such action specified yet. No ACTION taken'
     # ***********************************************
+
+    # get the keywords if requested
+    if MAction == 'Keywords':
+        # Since to evade classification, we only need to find out the first matching packet
+        # TODO: What are the proper keywords to give to the proxy?
+        # A regular expression!
+        # Get the keywords from first packet, MList[0] is the matching bytes of the first client packet
+        # Alist contains the bytes that are being matched
+        # Check matching bytes in FIRST! packet, that's why MList[0] and clientQ[0]
+        keywords = []
+        for Alist in MList[0]:
+            start = Alist[0]
+            end = Alist[-1] + 1
+            # We get the keyword from each sub field
+            keyword = clientQ[0].payload.decode('hex')[start : end]
+            keywords.append(keyword)
+        # We return the list of keywords in the same position as it is in the original packet
+        return keywords
+
+
 
     pickle.dump(streamSkippedList, open((configs.get('pcap_folder')+'/streamSkippedList.pickle'), "w" ), 2)
     pickle.dump((clientQ, udpClientPorts, list(tcpCSPs), replay_name)          , open((pcap_file+'_client_all.pickle'), "w" ), 2)
     pickle.dump((serverQ, LUT, getLUT, udpServers, tcpServerPorts, replay_name), open((pcap_file+'_server_all.pickle'), "w" ), 2)
 
+    return 'Pickles are ready'
 
 def beingCalled(PcapDirectory, Side, Num, Action, Prot='tcp', Mlist = []):
-    PcapDirectory = PcapDirectory+'/'
-    run(PcapDirectory, Side, Num, Action, Prot, Mlist)
+    # If the PcapDirectory ends with '/', we remove that
+    if PcapDirectory.endswith('/'):
+        PcapDirectory = PcapDirectory[:-1]
+    return run(PcapDirectory, Side, Num, Action, Prot, Mlist)
